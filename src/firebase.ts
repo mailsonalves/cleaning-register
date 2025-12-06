@@ -201,7 +201,7 @@ export async function syncLocalIndexToFirestore(kind = 'cleaning') {
     await setDoc(doc(firestoreDb, 'appState', kind), { index: localIndex }, { merge: true });
     // keep local copy as fallback; do not remove automatically
     return true;
-  } catch (err) {
+  } catch (err: any) {
     console.warn(`Failed to sync ${kind} index to Firestore`, err?.code || err?.message || err);
     return false;
   }

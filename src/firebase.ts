@@ -62,27 +62,38 @@ if (firestoreDb) {
   }
 }
 
-export async function getHistory() {
+export async function getHistory(kind = 'cleaning') {
+  const localKey = `${kind}History`;
   if (!firestoreDb) {
     try {
-      const raw = localStorage.getItem('cleaningHistory');
+      const raw = localStorage.getItem(localKey);
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
     }
   }
-
-  const q = query(collection(firestoreDb, 'cleaningHistory'), orderBy('createdAt', 'desc'));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  try {
+    const q = query(collection(firestoreDb, `${kind}History`), orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+  } catch (err) {
+    console.warn(`Failed to read ${kind}History from Firestore, falling back to localStorage`, err);
+    try {
+      const raw = localStorage.getItem(localKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
 }
 
-export async function addHistoryEntry(entry: { user: string; dateISO: string; display: string }) {
+export async function addHistoryEntry(entry: { user: string; dateISO: string; display: string }, kind = 'cleaning') {
+  const localKey = `${kind}History`;
   if (!firestoreDb) {
-    const current = (await getHistory()) || [];
+    const current = (await getHistory(kind)) || [];
     const next = [...current, entry];
     try {
-      localStorage.setItem('cleaningHistory', JSON.stringify(next));
+      localStorage.setItem(localKey, JSON.stringify(next));
     } catch (e) {
       console.error('Failed to write local history', e);
     }
@@ -93,33 +104,55 @@ export async function addHistoryEntry(entry: { user: string; dateISO: string; di
   try {
     await authReady;
   } catch {}
-
-  const ref = await addDoc(collection(firestoreDb, 'cleaningHistory'), { ...entry, createdAt: serverTimestamp() });
-  return ref.id;
+  try {
+    const ref = await addDoc(collection(firestoreDb, `${kind}History`), { ...entry, createdAt: serverTimestamp() });
+    return ref.id;
+  } catch (err) {
+    console.warn(`Failed to write ${kind}History to Firestore, falling back to localStorage`, err);
+    const current = (await getHistory(kind)) || [];
+    const next = [...current, entry];
+    try {
+      localStorage.setItem(localKey, JSON.stringify(next));
+    } catch (e) {
+      console.error('Failed to write local history', e);
+    }
+    return 'local-' + Date.now();
+  }
 }
 
-export async function getCleaningIndex() {
+export async function getIndex(kind = 'cleaning') {
+  const localKey = `${kind}Index`;
   if (!firestoreDb) {
     try {
-      const raw = localStorage.getItem('cleaningIndex');
+      const raw = localStorage.getItem(localKey);
       return raw ? parseInt(raw) : null;
     } catch {
       return null;
     }
   }
-
-  const docRef = doc(firestoreDb, 'appState', 'cleaning');
-  const d = await getDoc(docRef);
-  if (d.exists()) return (d.data() as any).index as number;
-  return null;
+  try {
+    const docRef = doc(firestoreDb, 'appState', kind);
+    const d = await getDoc(docRef);
+    if (d.exists()) return (d.data() as any).index as number;
+    return null;
+  } catch (err) {
+    console.warn(`Failed to read ${kind} index from Firestore, falling back to localStorage`, err);
+    try {
+      const raw = localStorage.getItem(localKey);
+      return raw ? parseInt(raw) : null;
+    } catch {
+      return null;
+    }
+  }
 }
 
-export async function setCleaningIndex(index: number) {
+export async function setIndex(index: number, kind = 'cleaning') {
+  const localKey = `${kind}Index`;
   if (!firestoreDb) {
     try {
-      localStorage.setItem('cleaningIndex', index.toString());
+      localStorage.setItem(localKey, index.toString());
     } catch (e) {
-      console.error('Failed to write local cleaningIndex', e);
+      console.error('Failed to write local index', e);
     }
     return;
   }
@@ -127,6 +160,23 @@ export async function setCleaningIndex(index: number) {
   try {
     await authReady;
   } catch {}
+  try {
+    await setDoc(doc(firestoreDb, 'appState', kind), { index }, { merge: true });
+  } catch (err) {
+    console.warn(`Failed to write ${kind} index to Firestore, falling back to localStorage`, err);
+    try {
+      localStorage.setItem(localKey, index.toString());
+    } catch (e) {
+      console.error('Failed to write local index', e);
+    }
+  }
+}
 
-  await setDoc(doc(firestoreDb, 'appState', 'cleaning'), { index }, { merge: true });
+// Backwards compatible helpers
+export async function getCleaningIndex() {
+  return getIndex('cleaning');
+}
+
+export async function setCleaningIndex(index: number) {
+  return setIndex(index, 'cleaning');
 }

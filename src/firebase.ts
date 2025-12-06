@@ -35,7 +35,17 @@ if (isConfigured) {
     firestoreDb = null;
   }
 } else {
-  console.warn('Firebase is not configured. Falling back to localStorage for history and index.\nPlease move your .env to project root and restart Vite to enable Firestore.');
+  // In development show a helpful warning. In production (deployed) it's normal
+  // to not have a local `.env` — hosting providers use environment variables.
+  if (import.meta.env.DEV) {
+    console.warn(
+      'Firebase is not configured. Falling back to localStorage for history and index.\n' +
+        'Create a .env file with VITE_FIREBASE_* keys for local dev, or set the VITE_FIREBASE_* environment variables in your hosting provider (e.g., Vercel) for production.'
+    );
+  } else {
+    // Keep noise low in production; log a concise info so deploy logs can show it if needed
+    console.info('Firebase not configured — using localStorage fallback. Set VITE_FIREBASE_* in your host to enable Firestore.');
+  }
 }
 
 // Setup anonymous auth and an auth-ready promise so writes wait until auth is ready

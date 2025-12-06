@@ -50,6 +50,7 @@ if (isConfigured) {
 
 // Setup anonymous auth and an auth-ready promise so writes wait until auth is ready
 let authReady: Promise<void> = Promise.resolve();
+let authUser: any = null;
 if (firestoreDb) {
   try {
     const auth = getAuth();
@@ -59,6 +60,7 @@ if (firestoreDb) {
     authReady = new Promise((resolve) => {
       const unsub = onAuthStateChanged(auth, (user) => {
         if (user) {
+          authUser = user;
           console.log('[Firebase] Anonymous auth ready, uid=', user.uid);
           unsub();
           resolve();
@@ -86,8 +88,8 @@ export async function getHistory(kind = 'cleaning') {
     const q = query(collection(firestoreDb, `${kind}History`), orderBy('createdAt', 'desc'));
     const snap = await getDocs(q);
     return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-  } catch (err) {
-    console.warn(`Failed to read ${kind}History from Firestore, falling back to localStorage`, err);
+  } catch (err: any) {
+    console.warn(`Failed to read ${kind}History from Firestore, falling back to localStorage`, err?.code || err?.message || err);
     try {
       const raw = localStorage.getItem(localKey);
       return raw ? JSON.parse(raw) : [];
@@ -117,8 +119,8 @@ export async function addHistoryEntry(entry: { user: string; dateISO: string; di
   try {
     const ref = await addDoc(collection(firestoreDb, `${kind}History`), { ...entry, createdAt: serverTimestamp() });
     return ref.id;
-  } catch (err) {
-    console.warn(`Failed to write ${kind}History to Firestore, falling back to localStorage`, err);
+  } catch (err: any) {
+    console.warn(`Failed to write ${kind}History to Firestore, falling back to localStorage`, err?.code || err?.message || err);
     const current = (await getHistory(kind)) || [];
     const next = [...current, entry];
     try {
@@ -145,8 +147,8 @@ export async function getIndex(kind = 'cleaning') {
     const d = await getDoc(docRef);
     if (d.exists()) return (d.data() as any).index as number;
     return null;
-  } catch (err) {
-    console.warn(`Failed to read ${kind} index from Firestore, falling back to localStorage`, err);
+  } catch (err: any) {
+    console.warn(`Failed to read ${kind} index from Firestore, falling back to localStorage`, err?.code || err?.message || err);
     try {
       const raw = localStorage.getItem(localKey);
       return raw ? parseInt(raw) : null;
@@ -172,8 +174,8 @@ export async function setIndex(index: number, kind = 'cleaning') {
   } catch {}
   try {
     await setDoc(doc(firestoreDb, 'appState', kind), { index }, { merge: true });
-  } catch (err) {
-    console.warn(`Failed to write ${kind} index to Firestore, falling back to localStorage`, err);
+  } catch (err: any) {
+    console.warn(`Failed to write ${kind} index to Firestore, falling back to localStorage`, err?.code || err?.message || err);
     try {
       localStorage.setItem(localKey, index.toString());
     } catch (e) {
@@ -200,9 +202,17 @@ export async function syncLocalIndexToFirestore(kind = 'cleaning') {
     // keep local copy as fallback; do not remove automatically
     return true;
   } catch (err) {
-    console.warn(`Failed to sync ${kind} index to Firestore`, err);
+    console.warn(`Failed to sync ${kind} index to Firestore`, err?.code || err?.message || err);
     return false;
   }
+}
+
+export function getFirebaseDiagnostics() {
+  return {
+    isConfigured,
+    firestoreAvailable: !!firestoreDb,
+    authUser: authUser ? { uid: authUser.uid, isAnonymous: !!authUser.isAnonymous } : null,
+  };
 }
 
 // Backwards compatible helpers

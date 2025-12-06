@@ -10,6 +10,7 @@ import {
   getIndex,
   setIndex,
   syncLocalIndexToFirestore,
+  getFirebaseDiagnostics,
 } from './firebase';
 
 // Lista de moradores para limpeza
@@ -53,6 +54,7 @@ function App() {
 
   const [showPostConfirm, setShowPostConfirm] = useState(false);
   const [postConfirmMessage, setPostConfirmMessage] = useState('Por favor, envie uma foto no grupo do quarto 40.');
+  const [firebaseDiag, setFirebaseDiag] = useState<{ isConfigured: boolean; firestoreAvailable: boolean; authUser: any } | null>(null);
 
   // Persistir índices localmente e no Firestore quando mudarem
   useEffect(() => {
@@ -97,6 +99,12 @@ function App() {
         console.warn('Não foi possível obter histórico de água do Firestore', e);
       }
 
+      // Diagnostics: read firebase status and attempt initial sync
+      try {
+        const d = getFirebaseDiagnostics();
+        setFirebaseDiag(d as any);
+      } catch {}
+
       // Try to sync any local indexes to Firestore (in case previous writes fell back to localStorage)
       try {
         // attempt immediately; if it fails we'll set up retries below
@@ -107,6 +115,22 @@ function App() {
       }
     })();
   }, []);
+
+  const handleForceSync = async () => {
+    try {
+      await syncLocalIndexToFirestore('cleaning');
+      await syncLocalIndexToFirestore('water');
+      const d = getFirebaseDiagnostics();
+      setFirebaseDiag(d as any);
+      // reload histories from source to reflect remote state
+      const remote = await getHistory('cleaning');
+      setHistory(remote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display })));
+      const wRemote = await getHistory('water');
+      setWaterHistory(wRemote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display })));
+    } catch (err) {
+      console.warn('Force sync failed', err);
+    }
+  };
 
   const currentUser = MEMBERS[currentIndex];
   const currentWaterUser = WATER_MEMBERS[waterIndex];
@@ -211,6 +235,19 @@ function App() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-2xl flex flex-col items-center gap-6">
+        {firebaseDiag && (!firebaseDiag.firestoreAvailable || !firebaseDiag.authUser) && (
+          <div className="w-full bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded-md text-sm text-yellow-800">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                { !firebaseDiag.firestoreAvailable && <div>Firebase não configurado no build (usando localStorage). Verifique variáveis no Vercel.</div> }
+                { firebaseDiag.firestoreAvailable && !firebaseDiag.authUser && <div>Firestore disponível, mas sem usuário autenticado (habilite Anonymous Auth no Firebase).</div> }
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={handleForceSync} className="px-3 py-1 bg-yellow-400 text-white rounded text-sm">Tentar sincronizar</button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Card de Limpeza */}
         <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all hover:scale-[1.01]">
           <div className="bg-indigo-600 h-32 relative">

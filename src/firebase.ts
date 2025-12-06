@@ -182,6 +182,29 @@ export async function setIndex(index: number, kind = 'cleaning') {
   }
 }
 
+// Try to sync any locally-stored index for `kind` to Firestore when possible.
+export async function syncLocalIndexToFirestore(kind = 'cleaning') {
+  const localKey = `${kind}Index`;
+  const raw = localStorage.getItem(localKey);
+  if (!raw) return false;
+  const localIndex = parseInt(raw as string);
+  if (isNaN(localIndex)) return false;
+  if (!firestoreDb) return false;
+
+  try {
+    await authReady;
+  } catch {}
+
+  try {
+    await setDoc(doc(firestoreDb, 'appState', kind), { index: localIndex }, { merge: true });
+    // keep local copy as fallback; do not remove automatically
+    return true;
+  } catch (err) {
+    console.warn(`Failed to sync ${kind} index to Firestore`, err);
+    return false;
+  }
+}
+
 // Backwards compatible helpers
 export async function getCleaningIndex() {
   return getIndex('cleaning');

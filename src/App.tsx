@@ -9,6 +9,7 @@ import {
   setCleaningIndex as fbSetCleaningIndex,
   getIndex,
   setIndex,
+  syncLocalIndexToFirestore,
 } from './firebase';
 
 // Lista de moradores para limpeza
@@ -95,6 +96,15 @@ function App() {
       } catch (e) {
         console.warn('Não foi possível obter histórico de água do Firestore', e);
       }
+
+      // Try to sync any local indexes to Firestore (in case previous writes fell back to localStorage)
+      try {
+        // attempt immediately; if it fails we'll set up retries below
+        await syncLocalIndexToFirestore('cleaning');
+        await syncLocalIndexToFirestore('water');
+      } catch (err) {
+        console.warn('Sync attempts failed (may retry)', err);
+      }
     })();
   }, []);
 
@@ -136,6 +146,20 @@ function App() {
     setIsModalOpen(false);
     setPostConfirmMessage('Registro de limpeza salvo. Obrigado!');
     setShowPostConfirm(true);
+
+    // try to sync local index to Firestore; if Firestore not available we'll retry periodically
+    (async function trySyncCleaning() {
+      const ok = await syncLocalIndexToFirestore('cleaning');
+      if (!ok) {
+        // schedule retries up to 6 times every 5s
+        let attempts = 0;
+        const t = setInterval(async () => {
+          attempts += 1;
+          const ok2 = await syncLocalIndexToFirestore('cleaning');
+          if (ok2 || attempts >= 6) clearInterval(t);
+        }, 5000);
+      }
+    })();
   };
 
   const handleWaterPurchase = async () => {
@@ -169,6 +193,19 @@ function App() {
     setIsWaterModalOpen(false);
     setPostConfirmMessage('Compra de água registrada. Obrigado!');
     setShowPostConfirm(true);
+
+    // try to sync local water index to Firestore with retries
+    (async function trySyncWater() {
+      const ok = await syncLocalIndexToFirestore('water');
+      if (!ok) {
+        let attempts = 0;
+        const t = setInterval(async () => {
+          attempts += 1;
+          const ok2 = await syncLocalIndexToFirestore('water');
+          if (ok2 || attempts >= 6) clearInterval(t);
+        }, 5000);
+      }
+    })();
   };
 
   return (
@@ -286,7 +323,6 @@ function App() {
             </div>
             <div className="flex gap-3">
               <button onClick={() => setIsHistoryOpen(false)} className="flex-1 px-4 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded-lg transition-colors">Fechar</button>
-              <button onClick={() => { localStorage.removeItem('cleaningHistory'); setHistory([]); }} className="flex-1 px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors">Limpar</button>
             </div>
           </div>
         </div>
@@ -311,7 +347,6 @@ function App() {
             </div>
             <div className="flex gap-3">
               <button onClick={() => setIsWaterHistoryOpen(false)} className="flex-1 px-4 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded-lg transition-colors">Fechar</button>
-              <button onClick={() => { localStorage.removeItem('waterHistory'); setWaterHistory([]); }} className="flex-1 px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition-colors">Limpar</button>
             </div>
           </div>
         </div>

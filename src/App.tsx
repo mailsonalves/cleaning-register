@@ -2,16 +2,7 @@ import { useState, useEffect } from 'react';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { CheckCircle, Calendar, User, List } from 'lucide-react';
-import {
-  getHistory,
-  addHistoryEntry,
-  getCleaningIndex,
-  setCleaningIndex as fbSetCleaningIndex,
-  getIndex,
-  setIndex,
-  syncLocalIndexToFirestore,
-  getFirebaseDiagnostics,
-} from './firebase';
+import { getHistory, addHistoryEntry, getFirebaseDiagnostics } from './firebase';
 
 // Lista de moradores para limpeza
 const MEMBERS = ["Higor", "Mailson", "Senna", "Daniel"];
@@ -19,17 +10,11 @@ const MEMBERS = ["Higor", "Mailson", "Senna", "Daniel"];
 const WATER_MEMBERS = ["Higor", "Senna", "Mailson"];
 
 function App() {
-  // Cleaning index
-  const [currentIndex, setCurrentIndex] = useState(() => {
-    const saved = localStorage.getItem('cleaningIndex');
-    return saved ? parseInt(saved) : 0;
-  });
+  // Cleaning index (derived from history: next after last entry)
+  const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Water index
-  const [waterIndex, setWaterIndex] = useState(() => {
-    const saved = localStorage.getItem('waterIndex');
-    return saved ? parseInt(saved) : 0;
-  });
+  // Water index (derived from water history)
+  const [waterIndex, setWaterIndex] = useState(0);
 
   // Modals e datas
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -56,70 +41,50 @@ function App() {
   const [postConfirmMessage, setPostConfirmMessage] = useState('Por favor, envie uma foto no grupo do quarto 40.');
   const [firebaseDiag, setFirebaseDiag] = useState<{ isConfigured: boolean; firestoreAvailable: boolean; authUser: any } | null>(null);
 
-  // Persistir índices localmente e no Firestore quando mudarem
-  useEffect(() => {
-    localStorage.setItem('cleaningIndex', currentIndex.toString());
-    fbSetCleaningIndex(currentIndex).catch((e) => console.warn('Falha ao salvar índice no Firestore', e));
-  }, [currentIndex]);
-
-  useEffect(() => {
-    localStorage.setItem('waterIndex', waterIndex.toString());
-    setIndex(waterIndex, 'water').catch((e) => console.warn('Falha ao salvar índice de água no Firestore', e));
-  }, [waterIndex]);
+  // Nota: não persistimos mais o índice separadamente; ele é derivado do último registro do histórico.
 
   // Ao montar, buscar os índices e históricos do Firestore/local
   useEffect(() => {
     (async () => {
       try {
-        const idx = await getCleaningIndex();
-        if (typeof idx === 'number') setCurrentIndex(idx);
-      } catch (e) {
-        console.warn('Não foi possível obter índice da limpeza do Firestore', e);
-      }
-
-      try {
         const remote = await getHistory('cleaning');
-        setHistory(remote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display })));
+        const cleaned = remote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display }));
+        setHistory(cleaned);
+        // derive next index from last (most recent) entry
+        if (cleaned.length > 0) {
+          const last = cleaned[0].user; // getHistory returns newest first
+          const idx = MEMBERS.indexOf(last);
+          setCurrentIndex(idx === -1 ? 0 : (idx + 1) % MEMBERS.length);
+        }
       } catch (e) {
         console.warn('Não foi possível obter histórico de limpeza do Firestore', e);
       }
 
       // water
       try {
-        const wIdx = await getIndex('water');
-        if (typeof wIdx === 'number') setWaterIndex(wIdx);
-      } catch (e) {
-        console.warn('Não foi possível obter índice de água do Firestore', e);
-      }
-
-      try {
         const wRemote = await getHistory('water');
-        setWaterHistory(wRemote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display })));
+        const wCleaned = wRemote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display }));
+        setWaterHistory(wCleaned);
+        if (wCleaned.length > 0) {
+          const last = wCleaned[0].user;
+          const idx = WATER_MEMBERS.indexOf(last);
+          setWaterIndex(idx === -1 ? 0 : (idx + 1) % WATER_MEMBERS.length);
+        }
       } catch (e) {
         console.warn('Não foi possível obter histórico de água do Firestore', e);
       }
 
-      // Diagnostics: read firebase status and attempt initial sync
+      // Diagnostics: read firebase status
       try {
         const d = getFirebaseDiagnostics();
         setFirebaseDiag(d as any);
       } catch {}
-
-      // Try to sync any local indexes to Firestore (in case previous writes fell back to localStorage)
-      try {
-        // attempt immediately; if it fails we'll set up retries below
-        await syncLocalIndexToFirestore('cleaning');
-        await syncLocalIndexToFirestore('water');
-      } catch (err) {
-        console.warn('Sync attempts failed (may retry)', err);
-      }
     })();
   }, []);
 
   const handleForceSync = async () => {
     try {
-      await syncLocalIndexToFirestore('cleaning');
-      await syncLocalIndexToFirestore('water');
+      // apenas recarrega históricos e diagnósticos
       const d = getFirebaseDiagnostics();
       setFirebaseDiag(d as any);
       // reload histories from source to reflect remote state
@@ -152,11 +117,12 @@ function App() {
 
     try {
       await addHistoryEntry(entry, 'cleaning');
-      setHistory((prev) => [...prev, entry]);
+      // manter ordem: mais novo primeiro
+      setHistory((prev) => [entry, ...prev]);
     } catch (e) {
       console.error('Falha ao salvar no Firestore, salvando localmente', e);
       setHistory((prev) => {
-        const next = [...prev, entry];
+        const next = [entry, ...prev];
         try {
           localStorage.setItem('cleaningHistory', JSON.stringify(next));
         } catch (err) {
@@ -166,24 +132,14 @@ function App() {
       });
     }
 
-    setCurrentIndex((prev) => (prev + 1) % MEMBERS.length);
+    // atualizar índice atual derivado do último do histórico (novo registro)
+    const lastIdx = MEMBERS.indexOf(entry.user);
+    setCurrentIndex(lastIdx === -1 ? 0 : (lastIdx + 1) % MEMBERS.length);
     setIsModalOpen(false);
     setPostConfirmMessage('Registro de limpeza salvo. Obrigado!');
     setShowPostConfirm(true);
 
-    // try to sync local index to Firestore; if Firestore not available we'll retry periodically
-    (async function trySyncCleaning() {
-      const ok = await syncLocalIndexToFirestore('cleaning');
-      if (!ok) {
-        // schedule retries up to 6 times every 5s
-        let attempts = 0;
-        const t = setInterval(async () => {
-          attempts += 1;
-          const ok2 = await syncLocalIndexToFirestore('cleaning');
-          if (ok2 || attempts >= 6) clearInterval(t);
-        }, 5000);
-      }
-    })();
+    // não mais sync de índice: índice é derivado do histórico
   };
 
   const handleWaterPurchase = async () => {
@@ -199,11 +155,11 @@ function App() {
 
     try {
       await addHistoryEntry(entry, 'water');
-      setWaterHistory((prev) => [...prev, entry]);
+      setWaterHistory((prev) => [entry, ...prev]);
     } catch (e) {
       console.error('Falha ao salvar compra de água no Firestore, salvando localmente', e);
       setWaterHistory((prev) => {
-        const next = [...prev, entry];
+        const next = [entry, ...prev];
         try {
           localStorage.setItem('waterHistory', JSON.stringify(next));
         } catch (err) {
@@ -213,23 +169,13 @@ function App() {
       });
     }
 
-    setWaterIndex((prev) => (prev + 1) % WATER_MEMBERS.length);
+    const lastWIdx = WATER_MEMBERS.indexOf(entry.user);
+    setWaterIndex(lastWIdx === -1 ? 0 : (lastWIdx + 1) % WATER_MEMBERS.length);
     setIsWaterModalOpen(false);
     setPostConfirmMessage('Compra de água registrada. Obrigado!');
     setShowPostConfirm(true);
 
-    // try to sync local water index to Firestore with retries
-    (async function trySyncWater() {
-      const ok = await syncLocalIndexToFirestore('water');
-      if (!ok) {
-        let attempts = 0;
-        const t = setInterval(async () => {
-          attempts += 1;
-          const ok2 = await syncLocalIndexToFirestore('water');
-          if (ok2 || attempts >= 6) clearInterval(t);
-        }, 5000);
-      }
-    })();
+    // não mais sync de índice: índice é derivado do histórico
   };
 
   return (

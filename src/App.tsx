@@ -33,9 +33,11 @@ function App() {
   // Históricos e estados de UI
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
 
   const [waterHistory, setWaterHistory] = useState<HistoryEntry[]>([]);
   const [isWaterHistoryOpen, setIsWaterHistoryOpen] = useState(false);
+  const [isWaterHistoryLoading, setIsWaterHistoryLoading] = useState(true);
 
   const [showPostConfirm, setShowPostConfirm] = useState(false);
   const [postConfirmMessage, setPostConfirmMessage] = useState('Por favor, envie uma foto no grupo do quarto 40.');
@@ -50,6 +52,7 @@ function App() {
         const remote = await getHistory('cleaning');
         const cleaned = remote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display }));
         setHistory(cleaned);
+        setIsHistoryLoading(false);
         // derive next index from last (most recent) entry
         if (cleaned.length > 0) {
           const last = cleaned[0].user; // getHistory returns newest first
@@ -57,6 +60,7 @@ function App() {
           setCurrentIndex(idx === -1 ? 0 : (idx + 1) % MEMBERS.length);
         }
       } catch (e) {
+        setIsHistoryLoading(false);
         console.warn('Não foi possível obter histórico de limpeza do Firestore', e);
       }
 
@@ -65,12 +69,14 @@ function App() {
         const wRemote = await getHistory('water');
         const wCleaned = wRemote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display }));
         setWaterHistory(wCleaned);
+        setIsWaterHistoryLoading(false);
         if (wCleaned.length > 0) {
           const last = wCleaned[0].user;
           const idx = WATER_MEMBERS.indexOf(last);
           setWaterIndex(idx === -1 ? 0 : (idx + 1) % WATER_MEMBERS.length);
         }
       } catch (e) {
+        setIsWaterHistoryLoading(false);
         console.warn('Não foi possível obter histórico de água do Firestore', e);
       }
 
@@ -88,10 +94,14 @@ function App() {
       const d = getFirebaseDiagnostics();
       setFirebaseDiag(d as any);
       // reload histories from source to reflect remote state
+      setIsHistoryLoading(true);
+      setIsWaterHistoryLoading(true);
       const remote = await getHistory('cleaning');
       setHistory(remote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display })));
+      setIsHistoryLoading(false);
       const wRemote = await getHistory('water');
       setWaterHistory(wRemote.map((r: any) => ({ user: r.user, dateISO: r.dateISO, display: r.display })));
+      setIsWaterHistoryLoading(false);
     } catch (err) {
       console.warn('Force sync failed', err);
     }
@@ -199,13 +209,23 @@ function App() {
           <div className="bg-indigo-600 h-32 relative">
             <div className="absolute -bottom-12 left-1/2 transform -translate-x-1/2">
               <div className="p-1 bg-white rounded-full shadow-lg">
-                <img src={avatarUrl} alt={currentUser} className="w-24 h-24 rounded-full object-cover border-4 border-white" />
+                {isHistoryLoading ? (
+                  <div className="w-24 h-24 rounded-full bg-gray-200 animate-pulse filter blur-sm border-4 border-white" />
+                ) : (
+                  <img src={avatarUrl} alt={currentUser} className="w-24 h-24 rounded-full object-cover border-4 border-white" />
+                )}
               </div>
             </div>
           </div>
           <div className="pt-16 pb-8 px-8 text-center">
             <h2 className="text-gray-500 text-sm font-semibold uppercase tracking-wide mb-1">Vez da limpeza</h2>
-            <h1 className="text-3xl font-bold text-gray-800 mb-6">{currentUser}</h1>
+            <h1 className="text-3xl font-bold text-gray-800 mb-6">
+              {isHistoryLoading ? (
+                <div className="mx-auto w-32 h-8 bg-gray-200 rounded-md animate-pulse filter blur-sm" />
+              ) : (
+                currentUser
+              )}
+            </h1>
 
             <div className="bg-indigo-50 rounded-xl p-4 mb-6 text-indigo-700 text-sm flex items-center justify-center gap-2">
               <User size={18} />
@@ -228,13 +248,23 @@ function App() {
           <div className="bg-cyan-600 h-32 relative">
             <div className="absolute -bottom-12 left-1/2 transform -translate-x-1/2">
               <div className="p-1 bg-white rounded-full shadow-lg">
-                <img src={waterAvatarUrl} alt={currentWaterUser} className="w-24 h-24 rounded-full object-cover border-4 border-white" />
+                {isWaterHistoryLoading ? (
+                  <div className="w-24 h-24 rounded-full bg-gray-200 animate-pulse filter blur-sm border-4 border-white" />
+                ) : (
+                  <img src={waterAvatarUrl} alt={currentWaterUser} className="w-24 h-24 rounded-full object-cover border-4 border-white" />
+                )}
               </div>
             </div>
           </div>
           <div className="pt-16 pb-8 px-8 text-center">
             <h2 className="text-gray-500 text-sm font-semibold uppercase tracking-wide mb-1">Compra de água</h2>
-            <h1 className="text-3xl font-bold text-gray-800 mb-6">{currentWaterUser}</h1>
+            <h1 className="text-3xl font-bold text-gray-800 mb-6">
+              {isWaterHistoryLoading ? (
+                <div className="mx-auto w-32 h-8 bg-gray-200 rounded-md animate-pulse filter blur-sm" />
+              ) : (
+                currentWaterUser
+              )}
+            </h1>
 
             <div className="bg-cyan-50 rounded-xl p-4 mb-6 text-cyan-700 text-sm flex items-center justify-center gap-2">
               <User size={18} />
